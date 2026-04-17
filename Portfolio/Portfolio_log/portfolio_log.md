@@ -894,3 +894,367 @@ To-Do List Manager
 Enter your choice: 6
 PS C:\Users\raibi\OneDrive\Documents\Python-ISD26>
 ```
+
+### Task : Portfolio Exercise 5
+
+Portfolio Exercise 5 requires you to work in the `Portfolio\exercise_5\src` folder by copying and improving your existing ToDo application. You must enhance the program by adding exception handling using try-except blocks to prevent crashes from invalid input, and refactor the code to achieve separation of concerns by creating a `CommandLineUI` class for handling user interaction and a `TaskManagerController` class for business logic. You also need to implement a `TaskFactory` to manage object creation and add a `check_task_index()` method in `TaskList` to follow the DRY principle. Finally, update the main module to correctly connect the UI and controller. The final program should be well-structured, follow SOLID principles, and be easy to maintain, with optional features such as login, editing tasks, or displaying overdue tasks for additional improvement.
+
+``` python
+# main.py
+from controllers.task_manager_controller import TaskManagerController
+from ui.command_line_ui import CommandLineUI
+
+# Entry point of the application
+def main():
+    # Separation of concerns: connect UI and controller
+    controller = TaskManagerController()
+    ui = CommandLineUI(controller)
+    ui.run()
+
+if __name__ == "__main__":
+    main()
+```
+
+``` python
+# models/task.py
+import datetime
+
+# SRP: This class is ONLY responsible for storing task data
+class Task:
+    def __init__(self, title: str, date: datetime.datetime):
+        self.title = title
+        self.date = date
+        self.completed = False
+
+    def mark_completed(self):
+        # Marks task as completed
+        self.completed = True
+
+    def __str__(self):
+        status = "Done" if self.completed else "Pending"
+        return f"{self.title} | Due: {self.date.date()} | {status}"
+```
+
+``` python
+# models/task_list.py
+# SRP: Manages the collection of tasks ONLY
+class TaskList:
+    def __init__(self):
+        self.tasks = []
+
+    def add_task(self, task):
+        self.tasks.append(task)
+
+    def get_task(self, index):
+        return self.tasks[index]
+
+    # DRY + validation logic reused across app
+    def check_task_index(self, ix: int) -> bool:
+        return 0 <= ix < len(self.tasks)
+```
+
+``` python
+# models/recurring_task.py
+from models.task import Task
+import datetime
+
+# OCP + LSP: Extends Task without modifying it
+# Can be used wherever Task is used
+class RecurringTask(Task):
+    def __init__(self, title, date, interval):
+        super().__init__(title, date)
+        self.interval = interval
+
+    def mark_completed(self):
+        # Different behaviour: instead of completing,
+        # move the task forward (recurring logic)
+        self.date += self.interval
+```
+
+### Task : Portfolio Exercise 6
+
+Add a new task type called `PriorityTask` that extends the Task class with priority levels (1-3: low, medium, high). Integrate this new task type throughout the ToDo application including the TaskFactory, CommandLineUI, and DAO (Data Access Object). For this, you should:
+
+- Create a `PriorityTask` class that inherits from `Task` with priority validation (1-3)
+- Add a `PRIORITY_LEVELS` dictionary to map integers to string representations ('low', 'medium', 'high')
+- Add `priority` property with getter and setter for validation
+- Add `get_priority_string()` method for readable output
+- Update `__str__` to display priority level (e.g., `[HIGH]`, `[MEDIUM]`, `[LOW]`)
+- Update `TaskFactory.create_task()` to support creating PriorityTask with `priority` parameter
+- Update `CommandLineUI` with new menu option to add priority tasks with clear instructions
+- Add user-friendly date entry instructions showing how to enter days from today
+- Create `TaskCsvDAO` class to persist all task types (Task, RecurringTask, PriorityTask) to CSV
+
+``` python
+# models/priority_task.py
+from models.task import Task
+import datetime
+from typing import Dict
+
+class PriorityTask(Task):
+    # Mapping from priority level to string representation
+    PRIORITY_LEVELS: Dict[int, str] = {
+        1: "low",
+        2: "medium",
+        3: "high"
+    }
+    
+    def __init__(self, title: str, date: datetime.datetime, priority: int) -> None:
+        """Initialize a PriorityTask with priority validation."""
+        super().__init__(title, date)
+        
+        if priority not in self.PRIORITY_LEVELS:
+            raise ValueError(f"Priority must be between 1 and 3, got {priority}")
+        
+        self._priority = priority
+
+    @property
+    def priority(self) -> int:
+        """Get the priority level."""
+        return self._priority
+    
+    @priority.setter
+    def priority(self, value: int) -> None:
+        """Set the priority level with validation."""
+        if value not in self.PRIORITY_LEVELS:
+            raise ValueError(f"Priority must be between 1 and 3, got {value}")
+        self._priority = value
+
+    def get_priority_string(self) -> str:
+        """Get the string representation of the priority level."""
+        return self.PRIORITY_LEVELS[self._priority]
+
+    def __str__(self) -> str:
+        status = "Done" if self.completed else "Pending"
+        priority_str = self.get_priority_string()
+        return f"[{priority_str.upper()}] {self.title} | Due: {self.date.date()} | {status}"
+```
+
+``` python
+# factory/task_factory.py
+from models.task import Task
+from models.recurring_task import RecurringTask
+from models.priority_task import PriorityTask
+import datetime
+from typing import Optional
+
+class TaskFactory:
+    @staticmethod
+    def create_task(title: str, date: datetime.datetime, **kwargs) -> Task:
+        """
+        Create a task based on provided parameters.
+        Supports: regular Task, RecurringTask (with interval), PriorityTask (with priority)
+        """
+        if "priority" in kwargs:
+            priority = kwargs["priority"]
+            return PriorityTask(title, date, priority)
+        
+        if "interval" in kwargs:
+            return RecurringTask(title, date, kwargs["interval"])
+        
+        return Task(title, date)
+```
+
+``` python
+# controllers/task_manager_controller.py
+from models.task_list import TaskList
+from factory.task_factory import TaskFactory
+import datetime
+
+class TaskManagerController:
+    def __init__(self) -> None:
+        self.task_list = TaskList()
+
+    def add_priority_task(self, title: str, days: int, priority: int) -> bool:
+        """Add a priority task with validation."""
+        try:
+            date = datetime.datetime.now() + datetime.timedelta(days=days)
+            task = TaskFactory.create_task(title, date, priority=priority)
+            self.task_list.add_task(task)
+            return True
+        except ValueError as e:
+            print(f"Invalid priority: {e}")
+            return False
+        except Exception as e:
+            print(f"Error adding priority task: {e}")
+            return False
+```
+
+``` python
+# ui/command_line_ui.py
+class CommandLineUI:
+    def print_welcome(self) -> None:
+        """Print welcome message with date entry instructions."""
+        print("\n" + "="*60)
+        print("Welcome to ToDo App!")
+        print("="*60)
+        print("\n HOW TO ENTER DATES:")
+        print("   When asked 'Days from today until due', enter a NUMBER:")
+        print("   • 0  = Today")
+        print("   • 1  = Tomorrow")
+        print("   • 7  = Next week")
+        print("   • 30 = About a month from now")
+        print("   • 365= About a year from now")
+        print("="*60 + "\n")
+
+    def add_priority_task_ui(self) -> None:
+        """UI for adding a priority task."""
+        title = input("Enter title: ").strip()
+        if not title:
+            print("Task title cannot be empty!")
+            return
+        
+        try:
+            days = int(input("Days from today until due (e.g., 1 for tomorrow, 7 for next week): "))
+            
+            print("\nPriority levels:")
+            print("  1 - Low    (e.g., Nice to have, someday)")
+            print("  2 - Medium (e.g., Important, should do)")
+            print("  3 - High   (e.g., Urgent, must do)")
+            priority = int(input("Enter priority (1, 2, or 3): "))
+            
+            if self.controller.add_priority_task(title, days, priority):
+                print("✓ Priority task added successfully!")
+            else:
+                print("✗ Failed to add priority task")
+        except ValueError as e:
+            print(f"Please enter valid numbers! {e}")
+```
+
+``` python
+# dao/task_csv_dao.py
+import csv
+import datetime
+from typing import List
+from models.task import Task
+from models.recurring_task import RecurringTask
+from models.priority_task import PriorityTask
+
+class TaskCsvDAO:
+    """Data access object for saving and loading tasks from CSV."""
+    
+    def __init__(self, storage_path: str) -> None:
+        self.storage_path = storage_path
+        self.fieldnames = ["title", "type", "date_due", "completed", "interval", "priority"]
+
+    def get_all_tasks(self) -> List[Task]:
+        """Load all tasks from CSV file."""
+        task_list: List[Task] = []
+        
+        try:
+            with open(self.storage_path, "r") as file:
+                reader = csv.DictReader(file)
+                
+                for row in reader:
+                    task_type = row.get("type", "Task").strip()
+                    title = row.get("title", "").strip()
+                    date_due_str = row.get("date_due", "")
+                    completed = row.get("completed", "False").lower() == "true"
+                    
+                    # Parse the date
+                    try:
+                        task_date = datetime.datetime.strptime(date_due_str, "%Y-%m-%d %H:%M:%S.%f")
+                    except ValueError:
+                        task_date = datetime.datetime.now()
+                    
+                    # Create the appropriate task type
+                    if task_type == "RecurringTask":
+                        interval_str = row.get("interval", "7").strip()
+                        interval_days = int(interval_str) if interval_str else 7
+                        task = RecurringTask(title, task_date, datetime.timedelta(days=interval_days))
+                    
+                    elif task_type == "PriorityTask":
+                        priority_str = row.get("priority", "1").strip()
+                        priority = int(priority_str) if priority_str else 1
+                        task = PriorityTask(title, task_date, priority)
+                    
+                    else:
+                        task = Task(title, task_date)
+                    
+                    if completed:
+                        task.completed = True
+                    
+                    task_list.append(task)
+        
+        except FileNotFoundError:
+            pass
+        
+        return task_list
+
+    def save_all_tasks(self, tasks: List[Task]) -> bool:
+        """Save all tasks to CSV file."""
+        try:
+            with open(self.storage_path, "w", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=self.fieldnames)
+                writer.writeheader()
+                
+                for task in tasks:
+                    row = {
+                        "title": task.title,
+                        "type": type(task).__name__,
+                        "date_due": task.date.strftime("%Y-%m-%d %H:%M:%S.%f"),
+                        "completed": str(task.completed),
+                        "interval": "",
+                        "priority": ""
+                    }
+                    
+                    if isinstance(task, RecurringTask):
+                        row["interval"] = str(task.interval.days)
+                    elif isinstance(task, PriorityTask):
+                        row["priority"] = str(task.priority)
+                    
+                    writer.writerow(row)
+            
+            return True
+        except Exception as e:
+            print(f"Error saving tasks to CSV: {e}")
+            return False
+```
+
+Output
+
+``` Console
+--- ToDo App Menu ---
+1. Add Task (enter days from today)
+2. Add Recurring Task (repeating at intervals)
+3. Add Priority Task (Low/Medium/High)
+4. Complete Task
+5. Delete Task
+6. Show All Tasks
+0. Exit
+Choose an option: 3
+Enter title: Finish project report
+Days from today until due (e.g., 1 for tomorrow, 7 for next week): 2
+
+Priority levels:
+  1 - Low    (e.g., Nice to have, someday)
+  2 - Medium (e.g., Important, should do)
+  3 - High   (e.g., Urgent, must do)
+Enter priority (1, 2, or 3): 3
+Priority task added successfully!
+
+--- ToDo App Menu ---
+1. Add Task (enter days from today)
+2. Add Recurring Task (repeating at intervals)
+3. Add Priority Task (Low/Medium/High)
+4. Complete Task
+5. Delete Task
+6. Show All Tasks
+0. Exit
+Choose an option: 6
+
+--- Tasks ---
+0: [HIGH] Finish project report | Due: 2026-04-06 | Pending
+
+--- ToDo App Menu ---
+1. Add Task (enter days from today)
+2. Add Recurring Task (repeating at intervals)
+3. Add Priority Task (Low/Medium/High)
+4. Complete Task
+5. Delete Task
+6. Show All Tasks
+0. Exit
+Choose an option: 0
+Goodbye!
+```
+
